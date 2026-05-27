@@ -506,7 +506,16 @@ struct ContentView: View {
                     .font(.caption2)
                     .lineLimit(1)
             }
-            .frame(width: 58, height: 42)
+            .frame(width: 72, height: 52)
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.primary.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(Color.primary.opacity(0.18), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
     }
