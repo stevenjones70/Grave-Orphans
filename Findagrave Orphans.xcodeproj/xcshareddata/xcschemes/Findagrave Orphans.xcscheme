@@ -16,8 +16,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "479710A22F9D27B200C111A8"
-               BuildableName = "Findagrave Orphans.app"
-               BlueprintName = "Findagrave Orphans"
+               BuildableName = "Grave Orphans.app"
+               BlueprintName = "Grave Orphans"
                ReferencedContainer = "container:Findagrave Orphans.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -46,8 +46,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "479710A22F9D27B200C111A8"
-            BuildableName = "Findagrave Orphans.app"
-            BlueprintName = "Findagrave Orphans"
+            BuildableName = "Grave Orphans.app"
+            BlueprintName = "Grave Orphans"
             ReferencedContainer = "container:Findagrave Orphans.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -63,8 +63,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "479710A22F9D27B200C111A8"
-            BuildableName = "Findagrave Orphans.app"
-            BlueprintName = "Findagrave Orphans"
+            BuildableName = "Grave Orphans.app"
+            BlueprintName = "Grave Orphans"
             ReferencedContainer = "container:Findagrave Orphans.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

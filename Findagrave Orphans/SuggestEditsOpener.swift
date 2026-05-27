@@ -12,44 +12,62 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate, WKUIDelegate {
     var onFinished: (() -> Void)?
 
     private let urls: [URL]
-    private let webView = WKWebView()
-    private var currentIndex = 0
+    private let maxConcurrentPages: Int
+    private var nextIndex = 0
+    private var finishedCount = 0
     private var openedCount = 0
-    private var phase = Phase.memorialPage
+    private var workers: [ObjectIdentifier: Worker] = [:]
 
     private enum Phase {
         case memorialPage
         case suggestEditsPage
     }
 
-    init(urls: [URL]) {
+    private final class Worker {
+        let webView = WebViewFactory.makeWebView()
+        var phase = Phase.memorialPage
+        var index = 0
+    }
+
+    init(urls: [URL], maxConcurrentPages: Int) {
         self.urls = urls
+        self.maxConcurrentPages = max(1, maxConcurrentPages)
         super.init()
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
     }
 
     func start() {
-        loadNext()
+        let workerCount = min(maxConcurrentPages, urls.count)
+
+        for _ in 0..<workerCount {
+            startWorker()
+        }
+
+        if urls.isEmpty {
+            onFinished?()
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            switch self.phase {
+        guard let worker = worker(for: webView) else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            switch worker.phase {
             case .memorialPage:
-                self.openSuggestEditsOrRequestToManage()
+                self.openSuggestEditsOrRequestToManage(worker)
             case .suggestEditsPage:
-                self.openRequestToManage()
+                self.openRequestToManage(worker)
             }
         }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        moveToNextPage()
+        finishPage(for: webView)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        moveToNextPage()
+        finishPage(for: webView)
     }
 
     func webView(
@@ -59,35 +77,45 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate, WKUIDelegate {
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         guard navigationAction.targetFrame == nil,
-              let url = navigationAction.request.url else {
+              let url = navigationAction.request.url,
+              let worker = worker(for: webView) else {
             return nil
         }
 
-        switch phase {
+        switch worker.phase {
         case .memorialPage:
-            phase = .suggestEditsPage
+            worker.phase = .suggestEditsPage
             webView.load(noCacheRequest(for: url))
         case .suggestEditsPage:
-            openRequestToManageURL(url.absoluteString)
+            openRequestToManageURL(url.absoluteString, worker: worker)
         }
 
         return nil
     }
 
-    private func loadNext() {
-        guard currentIndex < urls.count else {
-            onFinished?()
+    private func startWorker() {
+        guard nextIndex < urls.count else {
             return
         }
 
-        var request = URLRequest(url: urls[currentIndex])
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.timeoutInterval = 20
-        phase = .memorialPage
-        webView.load(request)
+        let worker = Worker()
+        worker.index = nextIndex
+        nextIndex += 1
+        workers[ObjectIdentifier(worker.webView)] = worker
+        worker.webView.navigationDelegate = self
+        worker.webView.uiDelegate = self
+        loadCurrentPage(on: worker)
     }
 
-    private func openSuggestEditsOrRequestToManage() {
+    private func loadCurrentPage(on worker: Worker) {
+        var request = URLRequest(url: urls[worker.index])
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 20
+        worker.phase = .memorialPage
+        worker.webView.load(request)
+    }
+
+    private func openSuggestEditsOrRequestToManage(_ worker: Worker) {
         let script = """
         (() => {
             const textFor = element => {
@@ -128,42 +156,42 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate, WKUIDelegate {
         })();
         """
 
-        webView.evaluateJavaScript(script) { result, error in
+        worker.webView.evaluateJavaScript(script) { result, error in
             if let error {
                 print("Suggest Edits lookup error:", error)
-                self.moveToNextPage()
+                self.finishPage(worker)
                 return
             }
 
             guard let action = result as? [String: Any],
                   let kind = action["kind"] as? String else {
-                self.moveToNextPage()
+                self.finishPage(worker)
                 return
             }
 
             switch kind {
             case "request":
-                self.openRequestToManageURL(action["href"] as? String)
+                self.openRequestToManageURL(action["href"] as? String, worker: worker)
             case "suggest":
                 guard let urlString = action["href"] as? String,
                       let url = URL(string: urlString) else {
-                    self.moveToNextPage()
+                    self.finishPage(worker)
                     return
                 }
 
-                self.phase = .suggestEditsPage
-                self.webView.load(self.noCacheRequest(for: url))
+                worker.phase = .suggestEditsPage
+                worker.webView.load(self.noCacheRequest(for: url))
             case "clicked":
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.openRequestToManage()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    self.openRequestToManage(worker)
                 }
             default:
-                self.moveToNextPage()
+                self.finishPage(worker)
             }
         }
     }
 
-    private func openRequestToManage() {
+    private func openRequestToManage(_ worker: Worker) {
         let script = """
         (() => {
             const matchesText = element => {
@@ -191,52 +219,52 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate, WKUIDelegate {
         })();
         """
 
-        webView.evaluateJavaScript(script) { result, error in
+        worker.webView.evaluateJavaScript(script) { result, error in
             if let error {
                 print("Request to Manage lookup error:", error)
-                self.moveToNextPage()
+                self.finishPage(worker)
                 return
             }
 
             guard let action = result as? [String: Any],
                   let kind = action["kind"] as? String else {
-                self.moveToNextPage()
+                self.finishPage(worker)
                 return
             }
 
             switch kind {
             case "href":
-                self.openRequestToManageURL(action["href"] as? String)
+                self.openRequestToManageURL(action["href"] as? String, worker: worker)
             case "clicked":
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.openCurrentRequestPageOrMoveOn()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    self.openCurrentRequestPageOrMoveOn(worker)
                 }
             default:
-                self.moveToNextPage()
+                self.finishPage(worker)
             }
         }
     }
 
-    private func openCurrentRequestPageOrMoveOn() {
-        guard let currentURL = webView.url else {
-            moveToNextPage()
+    private func openCurrentRequestPageOrMoveOn(_ worker: Worker) {
+        guard let currentURL = worker.webView.url else {
+            finishPage(worker)
             return
         }
 
-        openRequestToManageURL(currentURL.absoluteString)
+        openRequestToManageURL(currentURL.absoluteString, worker: worker)
     }
 
-    private func openRequestToManageURL(_ urlString: String?) {
+    private func openRequestToManageURL(_ urlString: String?, worker: Worker) {
         guard let urlString,
               let url = URL(string: urlString) else {
-            moveToNextPage()
+            finishPage(worker)
             return
         }
 
         openedCount += 1
         onProgress?(openedCount, urls.count)
         openExternalURL(url)
-        moveToNextPage()
+        finishPage(worker)
     }
 
     private func noCacheRequest(for url: URL) -> URLRequest {
@@ -246,12 +274,35 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate, WKUIDelegate {
         return request
     }
 
-    private func moveToNextPage() {
-        currentIndex += 1
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            self.loadNext()
+    private func finishPage(for webView: WKWebView) {
+        guard let worker = worker(for: webView) else {
+            return
         }
+
+        finishPage(worker)
+    }
+
+    private func finishPage(_ worker: Worker) {
+        finishedCount += 1
+
+        if nextIndex < urls.count {
+            worker.index = nextIndex
+            nextIndex += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.loadCurrentPage(on: worker)
+            }
+        } else {
+            workers.removeValue(forKey: ObjectIdentifier(worker.webView))
+            worker.webView.stopLoading()
+
+            if finishedCount >= urls.count {
+                onFinished?()
+            }
+        }
+    }
+
+    private func worker(for webView: WKWebView) -> Worker? {
+        workers[ObjectIdentifier(webView)]
     }
 
     private func openExternalURL(_ url: URL) {

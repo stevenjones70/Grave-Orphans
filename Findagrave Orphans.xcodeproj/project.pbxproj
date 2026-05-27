@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		479710A32F9D27B200C111A8 /* Findagrave Orphans.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Findagrave Orphans.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		479710A32F9D27B200C111A8 /* Grave Orphans.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Grave Orphans.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -40,7 +40,7 @@
 		479710A42F9D27B200C111A8 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				479710A32F9D27B200C111A8 /* Findagrave Orphans.app */,
+				479710A32F9D27B200C111A8 /* Grave Orphans.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		479710A22F9D27B200C111A8 /* Findagrave Orphans */ = {
+		479710A22F9D27B200C111A8 /* Grave Orphans */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 479710AE2F9D27B200C111A8 /* Build configuration list for PBXNativeTarget "Findagrave Orphans" */;
+			buildConfigurationList = 479710AE2F9D27B200C111A8 /* Build configuration list for PBXNativeTarget "Grave Orphans" */;
 			buildPhases = (
 				4797109F2F9D27B200C111A8 /* Sources */,
 				479710A02F9D27B200C111A8 /* Frameworks */,
@@ -63,11 +63,11 @@
 			fileSystemSynchronizedGroups = (
 				479710A52F9D27B200C111A8 /* Findagrave Orphans */,
 			);
-			name = "Findagrave Orphans";
+			name = "Grave Orphans";
 			packageProductDependencies = (
 			);
-			productName = "Findagrave Orphans";
-			productReference = 479710A32F9D27B200C111A8 /* Findagrave Orphans.app */;
+			productName = "Grave Orphans";
+			productReference = 479710A32F9D27B200C111A8 /* Grave Orphans.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -104,7 +104,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				479710A22F9D27B200C111A8 /* Findagrave Orphans */,
+				479710A22F9D27B200C111A8 /* Grave Orphans */,
 			);
 		};
 /* End PBXProject section */
@@ -268,12 +268,15 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Findagrave Orphans";
+				INFOPLIST_KEY_CFBundleDisplayName = "Grave Orphans";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				"INFOPLIST_KEY_UILaunchScreen[sdk=iphoneos*]" = "{ UIColorName = Black; UIImageName = SplashIcon; }";
+				"INFOPLIST_KEY_UILaunchScreen[sdk=iphonesimulator*]" = "{ UIColorName = Black; UIImageName = SplashIcon; }";
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
@@ -282,8 +285,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 4.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.steven.Findagrave-Orphans";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.steven.GraveOrphans;
+				PRODUCT_NAME = "Grave Orphans";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -311,12 +314,15 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Findagrave Orphans";
+				INFOPLIST_KEY_CFBundleDisplayName = "Grave Orphans";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				"INFOPLIST_KEY_UILaunchScreen[sdk=iphoneos*]" = "{ UIColorName = Black; UIImageName = SplashIcon; }";
+				"INFOPLIST_KEY_UILaunchScreen[sdk=iphonesimulator*]" = "{ UIColorName = Black; UIImageName = SplashIcon; }";
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
@@ -325,8 +331,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 4.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.steven.Findagrave-Orphans";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.steven.GraveOrphans;
+				PRODUCT_NAME = "Grave Orphans";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -350,7 +356,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		479710AE2F9D27B200C111A8 /* Build configuration list for PBXNativeTarget "Findagrave Orphans" */ = {
+		479710AE2F9D27B200C111A8 /* Build configuration list for PBXNativeTarget "Grave Orphans" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				479710AF2F9D27B200C111A8 /* Debug */,

@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct Findagrave_OrphansApp: App {
+struct GraveOrphansApp: App {
 
     var body: some Scene {
 
@@ -11,7 +11,7 @@ struct Findagrave_OrphansApp: App {
 
         #if os(macOS)
         Settings {
-            EmptyView()
+            SettingsView()
         }
         #endif
     }
