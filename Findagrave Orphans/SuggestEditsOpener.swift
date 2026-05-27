@@ -1,8 +1,13 @@
-import AppKit
 import Foundation
 import WebKit
 
-final class SuggestEditsOpener: NSObject, WKNavigationDelegate {
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
+
+final class SuggestEditsOpener: NSObject, WKNavigationDelegate, WKUIDelegate {
     var onProgress: ((Int, Int) -> Void)?
     var onFinished: (() -> Void)?
 
@@ -10,11 +15,18 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate {
     private let webView = WKWebView()
     private var currentIndex = 0
     private var openedCount = 0
+    private var phase = Phase.memorialPage
+
+    private enum Phase {
+        case memorialPage
+        case suggestEditsPage
+    }
 
     init(urls: [URL]) {
         self.urls = urls
         super.init()
         webView.navigationDelegate = self
+        webView.uiDelegate = self
     }
 
     func start() {
@@ -23,7 +35,12 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.openSuggestEditsLink()
+            switch self.phase {
+            case .memorialPage:
+                self.openSuggestEditsOrRequestToManage()
+            case .suggestEditsPage:
+                self.openRequestToManage()
+            }
         }
     }
 
@@ -35,6 +52,28 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate {
         moveToNextPage()
     }
 
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        guard navigationAction.targetFrame == nil,
+              let url = navigationAction.request.url else {
+            return nil
+        }
+
+        switch phase {
+        case .memorialPage:
+            phase = .suggestEditsPage
+            webView.load(noCacheRequest(for: url))
+        case .suggestEditsPage:
+            openRequestToManageURL(url.absoluteString)
+        }
+
+        return nil
+    }
+
     private func loadNext() {
         guard currentIndex < urls.count else {
             onFinished?()
@@ -44,10 +83,87 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate {
         var request = URLRequest(url: urls[currentIndex])
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 20
+        phase = .memorialPage
         webView.load(request)
     }
 
-    private func openSuggestEditsLink() {
+    private func openSuggestEditsOrRequestToManage() {
+        let script = """
+        (() => {
+            const textFor = element => {
+                return [
+                    element.innerText,
+                    element.textContent,
+                    element.getAttribute('aria-label'),
+                    element.getAttribute('title')
+                ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
+            };
+
+            const elements = Array.from(document.querySelectorAll('a, button, [role="button"]'));
+
+            const findElement = regex => elements.find(element => regex.test(textFor(element)));
+            const linkFor = element => {
+                const link = element?.closest('a[href]') || element?.querySelector('a[href]');
+                return link?.href || null;
+            };
+
+            const requestToManage = findElement(/request\\s+to\\s+manage/i);
+            const requestToManageLink = linkFor(requestToManage);
+            if (requestToManageLink) {
+                return { kind: 'request', href: requestToManageLink };
+            }
+
+            const suggestEdits = findElement(/suggest\\s+edits/i);
+            const suggestEditsLink = linkFor(suggestEdits);
+            if (suggestEditsLink) {
+                return { kind: 'suggest', href: suggestEditsLink };
+            }
+
+            if (suggestEdits) {
+                suggestEdits.click();
+                return { kind: 'clicked' };
+            }
+
+            return null;
+        })();
+        """
+
+        webView.evaluateJavaScript(script) { result, error in
+            if let error {
+                print("Suggest Edits lookup error:", error)
+                self.moveToNextPage()
+                return
+            }
+
+            guard let action = result as? [String: Any],
+                  let kind = action["kind"] as? String else {
+                self.moveToNextPage()
+                return
+            }
+
+            switch kind {
+            case "request":
+                self.openRequestToManageURL(action["href"] as? String)
+            case "suggest":
+                guard let urlString = action["href"] as? String,
+                      let url = URL(string: urlString) else {
+                    self.moveToNextPage()
+                    return
+                }
+
+                self.phase = .suggestEditsPage
+                self.webView.load(self.noCacheRequest(for: url))
+            case "clicked":
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.openRequestToManage()
+                }
+            default:
+                self.moveToNextPage()
+            }
+        }
+    }
+
+    private func openRequestToManage() {
         let script = """
         (() => {
             const matchesText = element => {
@@ -58,7 +174,7 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate {
                     element.getAttribute('title')
                 ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
 
-                return /suggest\\s+edits/i.test(text);
+                return /request\\s+to\\s+manage/i.test(text);
             };
 
             const elements = Array.from(document.querySelectorAll('a, button, [role="button"]'));
@@ -66,29 +182,68 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate {
             if (!match) return null;
 
             const link = match.closest('a[href]') || match.querySelector('a[href]');
-            return link?.href || null;
+            if (link?.href) {
+                return { kind: 'href', href: link.href };
+            }
+
+            match.click();
+            return { kind: 'clicked' };
         })();
         """
 
         webView.evaluateJavaScript(script) { result, error in
-            defer {
+            if let error {
+                print("Request to Manage lookup error:", error)
+                self.moveToNextPage()
+                return
+            }
+
+            guard let action = result as? [String: Any],
+                  let kind = action["kind"] as? String else {
+                self.moveToNextPage()
+                return
+            }
+
+            switch kind {
+            case "href":
+                self.openRequestToManageURL(action["href"] as? String)
+            case "clicked":
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.openCurrentRequestPageOrMoveOn()
+                }
+            default:
                 self.moveToNextPage()
             }
-
-            if let error {
-                print("Suggest Edits lookup error:", error)
-                return
-            }
-
-            guard let urlString = result as? String,
-                  let url = URL(string: urlString) else {
-                return
-            }
-
-            self.openedCount += 1
-            self.onProgress?(self.openedCount, self.urls.count)
-            NSWorkspace.shared.open(url)
         }
+    }
+
+    private func openCurrentRequestPageOrMoveOn() {
+        guard let currentURL = webView.url else {
+            moveToNextPage()
+            return
+        }
+
+        openRequestToManageURL(currentURL.absoluteString)
+    }
+
+    private func openRequestToManageURL(_ urlString: String?) {
+        guard let urlString,
+              let url = URL(string: urlString) else {
+            moveToNextPage()
+            return
+        }
+
+        openedCount += 1
+        onProgress?(openedCount, urls.count)
+        openExternalURL(url)
+        moveToNextPage()
+    }
+
+    private func noCacheRequest(for url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 20
+        return request
     }
 
     private func moveToNextPage() {
@@ -97,5 +252,13 @@ final class SuggestEditsOpener: NSObject, WKNavigationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             self.loadNext()
         }
+    }
+
+    private func openExternalURL(_ url: URL) {
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #elseif os(iOS)
+        UIApplication.shared.open(url)
+        #endif
     }
 }

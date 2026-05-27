@@ -1,6 +1,11 @@
-import AppKit
 import SwiftUI
 import WebKit
+
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 
 struct SavedLink: Identifiable, Codable {
     let id: UUID
@@ -20,18 +25,57 @@ struct ContentView: View {
     @State private var editingID: UUID?
     @State private var editingText = ""
     @State private var suggestEditsOpener: SuggestEditsOpener?
+    @State private var favoritesObserver: NSObjectProtocol?
 
     @FocusState private var focusedFavoriteID: UUID?
     @FocusState private var urlFieldFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
     private let saveKey = "SavedLinksKey"
+    private let backupSaveKey = "SavedLinksBackupKey"
 
     private var activeTab: BrowserTab? {
         tabs.first { $0.id == selectedTabID }
     }
 
     var body: some View {
+        appLayout
+            .preferredColorScheme(.dark)
+            #if os(macOS)
+            .frame(minWidth: 1300, minHeight: 750)
+            #endif
+            .onAppear {
+                loadFaves()
+                startFavoritesSync()
+                syncFavoritesFromCloud()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    syncFavoritesFromCloud()
+                    hardRefreshActiveTab()
+                }
+            }
+            .alert("Delete this favorite?", isPresented: $showDeleteConfirm) {
+                Button("Delete", role: .destructive) {
+                    if let linkToDelete {
+                        deleteLink(linkToDelete)
+                    }
+                }
+
+                Button("Cancel", role: .cancel) {}
+            }
+    }
+
+    @ViewBuilder
+    private var appLayout: some View {
+        #if os(macOS)
+        desktopLayout
+        #else
+        mobileLayout
+        #endif
+    }
+
+    private var desktopLayout: some View {
         HStack(spacing: 0) {
             sidebar
 
@@ -45,22 +89,16 @@ struct ContentView: View {
                 browserArea
             }
         }
-        .preferredColorScheme(.dark)
-        .frame(minWidth: 1300, minHeight: 750)
-        .onAppear(perform: loadFaves)
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                activeTab?.webView.reloadFromOrigin()
-            }
-        }
-        .alert("Delete this favorite?", isPresented: $showDeleteConfirm) {
-            Button("Delete", role: .destructive) {
-                if let linkToDelete {
-                    deleteLink(linkToDelete)
-                }
-            }
+    }
 
-            Button("Cancel", role: .cancel) {}
+    private var mobileLayout: some View {
+        VStack(spacing: 0) {
+            toolbar
+            mobileFavoritesBar
+            tabBar
+            statusBar
+            Divider()
+            browserArea
         }
     }
 
@@ -161,59 +199,89 @@ struct ContentView: View {
                     openTab(url: urlString)
                 }
 
-            HStack(spacing: 18) {
-                toolbarButton(title: "Favorite", systemImage: "star") {
-                    addCurrentToFaves()
-                }
-                .help("Add current URL to favorites")
-
-                toolbarButton(title: "Memorials", systemImage: "square.stack") {
-                    loadAllMemorials()
-                }
-                .help("Open memorial links from this page")
-
-                toolbarButton(title: "Suggest", systemImage: "pencil.line") {
-                    openSuggestEditsForNextTen()
-                }
-                .help("Open Suggest Edits for the first 10 memorials")
-
-                toolbarButton(title: "Back", systemImage: "chevron.left") {
-                    activeTab?.webView.goBack()
-                }
-                .help("Back")
-
-                toolbarButton(title: "Forward", systemImage: "chevron.right") {
-                    activeTab?.webView.goForward()
-                }
-                .help("Forward")
-
-                toolbarButton(title: "Refresh", systemImage: "arrow.clockwise") {
-                    refreshPage()
-                }
-                .keyboardShortcut("r", modifiers: .command)
-                .help("Refresh")
-
-                toolbarButton(title: "Browser", systemImage: "safari") {
-                    openInBrowser()
-                }
-                .help("Open in browser")
-
-                Button {
-                    if let activeTab {
-                        closeTab(activeTab)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 18) {
+                    toolbarButton(title: "Favorite", systemImage: "star") {
+                        addCurrentToFaves()
                     }
-                } label: {
-                    EmptyView()
-                }
-                .keyboardShortcut("w", modifiers: .command)
-                .opacity(0)
-                .frame(width: 0, height: 0)
+                    .help("Add current URL to favorites")
 
-                Spacer()
+                    toolbarButton(title: "Memorials", systemImage: "square.stack") {
+                        loadAllMemorials()
+                    }
+                    .help("Open memorial links from this page")
+
+                    toolbarButton(title: "Suggest", systemImage: "pencil.line") {
+                        openSuggestEditsForNextTen()
+                    }
+                    .help("Open Suggest Edits for the first 10 memorials")
+
+                    toolbarButton(title: "Back", systemImage: "chevron.left") {
+                        goBackAndRefresh()
+                    }
+                    .help("Back")
+
+                    toolbarButton(title: "Forward", systemImage: "chevron.right") {
+                        activeTab?.webView.goForward()
+                    }
+                    .help("Forward")
+
+                    toolbarButton(title: "Refresh", systemImage: "arrow.clockwise") {
+                        refreshPage()
+                    }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .help("Refresh")
+
+                    toolbarButton(title: "Browser", systemImage: "safari") {
+                        openInBrowser()
+                    }
+                    .help("Open in browser")
+
+                    Button {
+                        if let activeTab {
+                            closeTab(activeTab)
+                        }
+                    } label: {
+                        EmptyView()
+                    }
+                    .keyboardShortcut("w", modifiers: .command)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+
+                    Spacer()
+                }
             }
         }
         .padding(10)
         .background(.regularMaterial)
+    }
+
+    private var mobileFavoritesBar: some View {
+        HStack(spacing: 10) {
+            Menu {
+                Button("FindAGrave.com") {
+                    openFindAGrave()
+                }
+
+                ForEach(sortedSavedLinks) { link in
+                    Button(link.name) {
+                        openTab(url: link.url)
+                    }
+                }
+            } label: {
+                Label("Favorites", systemImage: "star")
+                    .font(.subheadline)
+            }
+
+            Spacer()
+
+            Text("\(sortedSavedLinks.count)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
     }
 
     private func toolbarButton(
@@ -304,7 +372,7 @@ struct ContentView: View {
                 WebViewDisplay(webView: activeTab.webView)
                     .id(activeTab.id)
                     .onAppear {
-                        activeTab.webView.reloadFromOrigin()
+                        hardRefresh(activeTab.webView)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -363,7 +431,7 @@ struct ContentView: View {
     private func selectTab(_ tab: BrowserTab) {
         selectedTabID = tab.id
         urlString = tab.webView.url?.absoluteString ?? tab.id
-        tab.webView.reloadFromOrigin()
+        hardRefresh(tab.webView)
     }
 
     private func closeTab(_ tab: BrowserTab) {
@@ -379,7 +447,40 @@ struct ContentView: View {
     private func refreshPage() {
         openedCount = 0
         discoveredLinks = []
-        activeTab?.webView.reloadFromOrigin()
+        hardRefreshActiveTab()
+    }
+
+    private func goBackAndRefresh() {
+        guard let webView = activeTab?.webView else {
+            return
+        }
+
+        if webView.canGoBack {
+            webView.goBack()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                hardRefresh(webView)
+            }
+        } else {
+            hardRefresh(webView)
+        }
+    }
+
+    private func hardRefreshActiveTab() {
+        guard let webView = activeTab?.webView else {
+            return
+        }
+
+        hardRefresh(webView)
+    }
+
+    private func hardRefresh(_ webView: WKWebView) {
+        guard let url = webView.url else {
+            return
+        }
+
+        webView.stopLoading()
+        webView.load(noCacheRequest(for: url))
     }
 
     private func openInBrowser() {
@@ -387,7 +488,7 @@ struct ContentView: View {
             return
         }
 
-        NSWorkspace.shared.open(currentURL)
+        openExternalURL(currentURL)
     }
 
     private func openFindAGrave() {
@@ -415,9 +516,7 @@ struct ContentView: View {
                 discoveredLinks = links
                 openedCount = urls.count
 
-                for url in urls {
-                    NSWorkspace.shared.open(url)
-                }
+                urls.forEach(openExternalURL)
             }
         }
     }
@@ -501,6 +600,8 @@ struct ContentView: View {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 20
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
         return request
     }
 
@@ -513,7 +614,8 @@ struct ContentView: View {
         let candidate = activeTab?.webView.url?.absoluteString ?? urlString
         let formatted = formatURL(candidate)
 
-        guard let url = URL(string: formatted) else {
+        guard let url = URL(string: formatted),
+              isUsableLink(SavedLink(id: UUID(), name: "Check", url: formatted)) else {
             return
         }
 
@@ -545,17 +647,130 @@ struct ContentView: View {
     }
 
     private func saveFaves() {
-        if let data = try? JSONEncoder().encode(savedLinks) {
-            UserDefaults.standard.set(data, forKey: saveKey)
-        }
-    }
+        let linksToSave = cleanedLinks(savedLinks)
 
-    private func loadFaves() {
-        guard let data = UserDefaults.standard.data(forKey: saveKey),
-              let decoded = try? JSONDecoder().decode([SavedLink].self, from: data) else {
+        guard !linksToSave.isEmpty,
+              let data = try? JSONEncoder().encode(linksToSave) else {
             return
         }
 
-        savedLinks = decoded
+        savedLinks = linksToSave
+        UserDefaults.standard.set(data, forKey: saveKey)
+        UserDefaults.standard.set(data, forKey: backupSaveKey)
+
+        let store = NSUbiquitousKeyValueStore.default
+        store.set(data, forKey: saveKey)
+        store.synchronize()
+    }
+
+    private func loadFaves() {
+        let primaryLinks = linksFromLocalStore(forKey: saveKey)
+        let backupLinks = linksFromLocalStore(forKey: backupSaveKey)
+        let bestLinks = primaryLinks.count >= backupLinks.count ? primaryLinks : backupLinks
+
+        guard !bestLinks.isEmpty else {
+            return
+        }
+
+        savedLinks = bestLinks
+    }
+
+    private func startFavoritesSync() {
+        guard favoritesObserver == nil else {
+            return
+        }
+
+        let store = NSUbiquitousKeyValueStore.default
+        favoritesObserver = NotificationCenter.default.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: store,
+            queue: .main
+        ) { _ in
+            syncFavoritesFromCloud()
+        }
+
+        store.synchronize()
+    }
+
+    private func syncFavoritesFromCloud() {
+        let store = NSUbiquitousKeyValueStore.default
+        store.synchronize()
+
+        if let data = store.data(forKey: saveKey),
+           let cloudLinks = try? JSONDecoder().decode([SavedLink].self, from: data) {
+            let cleanedCloudLinks = cleanedLinks(cloudLinks)
+            let cleanedLocalLinks = cleanedLinks(savedLinks)
+
+            if cleanedCloudLinks.isEmpty, !cleanedLocalLinks.isEmpty {
+                saveFaves()
+                return
+            }
+
+            let mergedLinks = mergedFavorites(local: cleanedLocalLinks, cloud: cleanedCloudLinks)
+
+            if !mergedLinks.isEmpty,
+               mergedLinks.map(\.url) != cleanedLocalLinks.map(\.url) ||
+                mergedLinks.map(\.name) != cleanedLocalLinks.map(\.name) {
+                savedLinks = mergedLinks
+                saveFaves()
+            }
+
+            return
+        }
+
+        guard !savedLinks.isEmpty,
+              let data = try? JSONEncoder().encode(savedLinks) else {
+            return
+        }
+
+        store.set(data, forKey: saveKey)
+        store.synchronize()
+    }
+
+    private func linksFromLocalStore(forKey key: String) -> [SavedLink] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([SavedLink].self, from: data) else {
+            return []
+        }
+
+        return cleanedLinks(decoded)
+    }
+
+    private func cleanedLinks(_ links: [SavedLink]) -> [SavedLink] {
+        var seenURLs = Set<String>()
+
+        return links.filter(isUsableLink).filter { link in
+            seenURLs.insert(link.url).inserted
+        }
+    }
+
+    private func isUsableLink(_ link: SavedLink) -> Bool {
+        guard let url = URL(string: link.url),
+              let host = url.host,
+              !host.isEmpty else {
+            return false
+        }
+
+        return link.url.hasPrefix("http://") || link.url.hasPrefix("https://")
+    }
+
+    private func mergedFavorites(local: [SavedLink], cloud: [SavedLink]) -> [SavedLink] {
+        var merged = local
+        var knownURLs = Set(local.map(\.url))
+
+        for link in cloud where !knownURLs.contains(link.url) {
+            merged.append(link)
+            knownURLs.insert(link.url)
+        }
+
+        return cleanedLinks(merged)
+    }
+
+    private func openExternalURL(_ url: URL) {
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #elseif os(iOS)
+        UIApplication.shared.open(url)
+        #endif
     }
 }

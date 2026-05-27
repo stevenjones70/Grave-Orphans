@@ -18,7 +18,7 @@ final class TabNavigationDelegate: NSObject, WKNavigationDelegate {
         }
     }
 
-    private static func cleanTitle(_ title: String, fallback: String) -> String {
+    nonisolated private static func cleanTitle(_ title: String, fallback: String) -> String {
         let cleaned = title
             .replacingOccurrences(of: " - Find a Grave Memorial", with: "")
             .replacingOccurrences(of: " | Find a Grave", with: "")
@@ -28,7 +28,7 @@ final class TabNavigationDelegate: NSObject, WKNavigationDelegate {
         return cleaned.isEmpty ? fallback : cleaned
     }
 
-    static func titleFallback(for url: URL) -> String {
+    nonisolated static func titleFallback(for url: URL) -> String {
         let pathParts = url.pathComponents.filter { $0 != "/" }
 
         if let memorialIndex = pathParts.firstIndex(of: "memorial"),
