@@ -3,8 +3,23 @@ import WebKit
 
 final class TabNavigationDelegate: NSObject, WKNavigationDelegate {
     var onTitleChanged: ((String) -> Void)?
+    var onURLChanged: ((String) -> Void)?
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if let url = webView.url?.absoluteString {
+            DispatchQueue.main.async {
+                self.onURLChanged?(url)
+            }
+        }
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if let url = webView.url?.absoluteString {
+            DispatchQueue.main.async {
+                self.onURLChanged?(url)
+            }
+        }
+
         let script = "document.title || document.querySelector('h1')?.innerText || ''"
 
         webView.evaluateJavaScript(script) { result, _ in

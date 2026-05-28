@@ -281,6 +281,7 @@ struct ContentView: View {
     @State private var openedCount = 0
     @State private var discoveredLinks: [String] = []
     @State private var showDeleteConfirm = false
+    @State private var showCloseAllConfirm = false
     @State private var linkToDelete: SavedLink?
     @State private var editingID: UUID?
     @State private var editingText = ""
@@ -305,7 +306,6 @@ struct ContentView: View {
     @AppStorage(AppSettingsKeys.startPageURL) private var startPageURL = AppDefaults.startPageURL
     @AppStorage(AppSettingsKeys.suggestBatchSize) private var suggestBatchSize = AppDefaults.suggestBatchSize
     @AppStorage(AppSettingsKeys.suggestParallelPages) private var suggestParallelPages = AppDefaults.suggestParallelPages
-    @AppStorage(AppSettingsKeys.feedbackEmail) private var feedbackEmail = AppDefaults.feedbackEmail
     @AppStorage(AppSettingsKeys.liquidGlassScale) private var liquidGlassScale = AppDefaults.liquidGlassScale
     @FocusState private var focusedFavoriteID: UUID?
     @FocusState private var urlFieldFocused: Bool
@@ -314,6 +314,8 @@ struct ContentView: View {
     private let saveKey = "SavedLinksKey"
     private let backupSaveKey = "SavedLinksBackupKey"
     private let saveTimestampKey = "SavedLinksUpdatedAt"
+    private let loadedTabMemoryLimit = 4
+    private let inactiveTabUnloadDelay: TimeInterval = 90
     private let helpTips = [
         AppTip(
             title: "Favorites keep your work handy",
@@ -383,12 +385,19 @@ struct ContentView: View {
 
             Button("Cancel", role: .cancel) {}
         }
+        .alert("Close all tabs?", isPresented: $showCloseAllConfirm) {
+            Button("Close All", role: .destructive) {
+                closeAllTabs()
+            }
+
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This closes every open tab.")
+        }
         .sheet(isPresented: $showHelp) {
             HelpView(
-                tipsEnabled: $tipsEnabled,
                 onReplaySplash: replaySplash,
-                onShowTips: showTipsFromHelp,
-                onTipsEnabledChanged: setTipsEnabled
+                onShowTips: showTipsFromHelp
             )
         }
         .sheet(isPresented: $showSettings) {
@@ -542,11 +551,6 @@ struct ContentView: View {
                     }
                     .help("Add current URL to favorites")
 
-                    toolbarButton(title: "Sync", systemImage: "icloud.and.arrow.down") {
-                        syncFavoritesNow()
-                    }
-                    .help("Sync favorites with iCloud")
-
                     toolbarButton(title: "Memorials", systemImage: "square.stack") {
                         loadAllMemorials()
                     }
@@ -579,7 +583,7 @@ struct ContentView: View {
                     .help("Open start page")
 
                     toolbarButton(title: "Close All", systemImage: "xmark.square") {
-                        closeAllTabs()
+                        showCloseAllConfirm = true
                     }
                     .help("Close all tabs")
 
@@ -587,11 +591,6 @@ struct ContentView: View {
                         openInBrowser()
                     }
                     .help("Open current page in Safari for Passwords AutoFill")
-
-                    toolbarButton(title: "Splash", systemImage: "sparkles") {
-                        replaySplash()
-                    }
-                    .help("Show splash screen")
 
                     toolbarButton(title: "Help", systemImage: "questionmark.circle") {
                         showHelp = true
@@ -930,6 +929,7 @@ struct ContentView: View {
         if let existing = tabs.first(where: { $0.id == finalURL.absoluteString }) {
             selectTab(existing)
             activeTab?.webView?.load(noCacheRequest(for: finalURL))
+            updateTabURL(tabID: existing.id, url: finalURL.absoluteString)
             urlString = formatted
             return
         }
@@ -940,6 +940,8 @@ struct ContentView: View {
         let tab = BrowserTab(
             id: tabID,
             title: TabNavigationDelegate.titleFallback(for: finalURL),
+            currentURL: finalURL.absoluteString,
+            lastAccessed: Date(),
             webView: webView,
             navigationDelegate: navigationDelegate
         )
@@ -947,6 +949,7 @@ struct ContentView: View {
         tabs.append(tab)
         selectedTabID = tab.id
         urlString = formatted
+        scheduleInactiveTabUnload()
     }
 
     private func updateTabTitle(tabID: String, title: String) {
@@ -957,10 +960,23 @@ struct ContentView: View {
         tabs[index].title = title
     }
 
+    private func updateTabURL(tabID: String, url: String) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else {
+            return
+        }
+
+        tabs[index].currentURL = url
+        if tabID == selectedTabID {
+            urlString = url
+        }
+    }
+
     private func selectTab(_ tab: BrowserTab) {
         selectedTabID = tab.id
+        markTabAccessed(tab.id)
         ensureWebView(for: tab.id)
-        urlString = activeTab?.webView?.url?.absoluteString ?? tab.id
+        urlString = activeTab?.webView?.url?.absoluteString ?? activeTab?.currentURL ?? tab.id
+        scheduleInactiveTabUnload()
     }
 
     private func ensureSelectedTabWebView() {
@@ -974,13 +990,14 @@ struct ContentView: View {
     private func ensureWebView(for tabID: String) {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }),
               tabs[index].webView == nil,
-              let url = URL(string: tabs[index].id) else {
+              let url = URL(string: tabs[index].currentURL) else {
             return
         }
 
         let (webView, navigationDelegate) = loadedWebView(for: url, tabID: tabID)
         tabs[index].webView = webView
         tabs[index].navigationDelegate = navigationDelegate
+        tabs[index].lastAccessed = Date()
     }
 
     private func loadedWebView(for url: URL, tabID: String) -> (WKWebView, TabNavigationDelegate) {
@@ -988,6 +1005,9 @@ struct ContentView: View {
         let navigationDelegate = TabNavigationDelegate()
         navigationDelegate.onTitleChanged = { title in
             updateTabTitle(tabID: tabID, title: title)
+        }
+        navigationDelegate.onURLChanged = { url in
+            updateTabURL(tabID: tabID, url: url)
         }
         webView.navigationDelegate = navigationDelegate
         webView.allowsBackForwardNavigationGestures = true
@@ -1003,7 +1023,47 @@ struct ContentView: View {
         if selectedTabID == tab.id {
             selectedTabID = tabs.last?.id
             ensureSelectedTabWebView()
-            urlString = activeTab?.webView?.url?.absoluteString ?? ""
+            if let selectedTabID {
+                markTabAccessed(selectedTabID)
+            }
+            urlString = activeTab?.webView?.url?.absoluteString ?? activeTab?.currentURL ?? ""
+        }
+    }
+
+    private func markTabAccessed(_ tabID: String) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else {
+            return
+        }
+
+        tabs[index].lastAccessed = Date()
+    }
+
+    private func scheduleInactiveTabUnload() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + inactiveTabUnloadDelay) {
+            unloadInactiveWebViews()
+        }
+    }
+
+    private func unloadInactiveWebViews() {
+        let loadedTabs = tabs
+            .filter { $0.webView != nil && $0.id != selectedTabID }
+            .sorted { $0.lastAccessed > $1.lastAccessed }
+
+        let keepIDs = Set(loadedTabs.prefix(max(0, loadedTabMemoryLimit - 1)).map(\.id))
+        let cutoff = Date().addingTimeInterval(-inactiveTabUnloadDelay)
+
+        for index in tabs.indices {
+            guard tabs[index].id != selectedTabID,
+                  tabs[index].webView != nil,
+                  !keepIDs.contains(tabs[index].id),
+                  tabs[index].lastAccessed < cutoff else {
+                continue
+            }
+
+            tabs[index].webView?.stopLoading()
+            tabs[index].webView?.navigationDelegate = nil
+            tabs[index].webView = nil
+            tabs[index].navigationDelegate = nil
         }
     }
 
@@ -1249,6 +1309,8 @@ struct ContentView: View {
             return
         }
 
+        setTipsEnabled(false)
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
             activeTipIndex = 0
             showTips = true
@@ -1274,7 +1336,6 @@ struct ContentView: View {
     }
 
     private func showTipsFromHelp() {
-        setTipsEnabled(true)
         activeTipIndex = 0
         showHelp = false
 
@@ -1601,6 +1662,8 @@ struct ContentView: View {
             BrowserTab(
                 id: url.absoluteString,
                 title: TabNavigationDelegate.titleFallback(for: url),
+                currentURL: url.absoluteString,
+                lastAccessed: .distantPast,
                 webView: nil,
                 navigationDelegate: nil
             )
@@ -1665,13 +1728,10 @@ private struct TipOverlay: View {
 }
 
 private struct HelpView: View {
-    @Binding var tipsEnabled: Bool
-    @AppStorage(AppSettingsKeys.feedbackEmail) private var feedbackEmail = AppDefaults.feedbackEmail
     @Environment(\.dismiss) private var dismiss
 
     let onReplaySplash: () -> Void
     let onShowTips: () -> Void
-    let onTipsEnabledChanged: (Bool) -> Void
 
     var body: some View {
         NavigationStack {
@@ -1688,14 +1748,6 @@ private struct HelpView: View {
                     } label: {
                         Label("Show Tips Now", systemImage: "lightbulb")
                     }
-
-                    Toggle(
-                        "Show tips on launch",
-                        isOn: Binding(
-                            get: { tipsEnabled },
-                            set: { onTipsEnabledChanged($0) }
-                        )
-                    )
                 }
 
                 Section("How Grave Orphans Helps") {
@@ -1758,7 +1810,7 @@ private struct HelpView: View {
         let subject = "Grave Orphans Feedback".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let body = "App feedback:\n\n".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
 
-        let recipient = feedbackEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let recipient = AppDefaults.feedbackEmail
 
         guard let url = URL(string: "mailto:\(recipient)?subject=\(subject)&body=\(body)") else {
             return

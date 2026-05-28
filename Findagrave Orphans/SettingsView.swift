@@ -8,12 +8,10 @@ import UIKit
 #endif
 
 struct SettingsView: View {
-    @AppStorage(AppSettingsKeys.tipsEnabled) private var tipsEnabled = true
     @AppStorage(AppSettingsKeys.appearanceMode) private var appearanceMode = AppearanceMode.dark.rawValue
     @AppStorage(AppSettingsKeys.startPageURL) private var startPageURL = AppDefaults.startPageURL
     @AppStorage(AppSettingsKeys.suggestBatchSize) private var suggestBatchSize = AppDefaults.suggestBatchSize
     @AppStorage(AppSettingsKeys.suggestParallelPages) private var suggestParallelPages = AppDefaults.suggestParallelPages
-    @AppStorage(AppSettingsKeys.feedbackEmail) private var feedbackEmail = AppDefaults.feedbackEmail
     @AppStorage(AppSettingsKeys.lastFavoritesSyncAt) private var lastFavoritesSyncAt = 0.0
     @AppStorage(AppSettingsKeys.liquidGlassScale) private var liquidGlassScale = AppDefaults.liquidGlassScale
 
@@ -44,14 +42,6 @@ struct SettingsView: View {
                     Button("Restore Default Glass") {
                         liquidGlassScale = AppDefaults.liquidGlassScale
                     }
-                }
-
-                Section("Tips") {
-                    Toggle("Show tips on launch", isOn: $tipsEnabled)
-
-                    Text("Turn this back on when you want the first-time tips to appear again.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("iCloud") {
@@ -117,9 +107,6 @@ struct SettingsView: View {
                     Text("Grave Orphans is not affiliated with Findagrave.com in any way.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
-                    TextField("Feedback email", text: $feedbackEmail)
-                        .textFieldStyle(.roundedBorder)
 
                     Button {
                         openFeedbackEmail()
@@ -221,7 +208,7 @@ struct SettingsView: View {
     private func openFeedbackEmail() {
         let subject = "Grave Orphans Feedback".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let body = "App feedback:\n\n".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let recipient = feedbackEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let recipient = AppDefaults.feedbackEmail
 
         openEmail(to: recipient, subject: subject, body: body)
     }
@@ -229,7 +216,7 @@ struct SettingsView: View {
     private func openSupportEmail() {
         let subject = "Grave Orphans Support".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let body = "Support request:\n\n".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let recipient = feedbackEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let recipient = AppDefaults.feedbackEmail
 
         openEmail(to: recipient, subject: subject, body: body)
     }
