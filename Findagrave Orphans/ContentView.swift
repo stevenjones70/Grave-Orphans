@@ -14,6 +14,8 @@ enum AppSettingsKeys {
     static let suggestBatchSize = "GraveOrphansSuggestBatchSize"
     static let suggestParallelPages = "GraveOrphansSuggestParallelPages"
     static let feedbackEmail = "GraveOrphansFeedbackEmail"
+    static let lastFavoritesSyncAt = "GraveOrphansLastFavoritesSyncAt"
+    static let liquidGlassScale = "GraveOrphansLiquidGlassScale"
 }
 
 enum AppDefaults {
@@ -21,6 +23,7 @@ enum AppDefaults {
     static let feedbackEmail = "jonesstevenm@icloud.com"
     static let suggestBatchSize = 10
     static let suggestParallelPages = 4
+    static let liquidGlassScale = 1.0
 }
 
 enum WebViewFactory {
@@ -131,8 +134,137 @@ extension String {
     }
 }
 
+extension View {
+    @ViewBuilder
+    func graveGlassPanel(scale: Double = AppDefaults.liquidGlassScale) -> some View {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            let strength = liquidGlassStrength(scale)
+
+            self
+                .background(.ultraThinMaterial)
+                .overlay {
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(liquidGlassOpacity(0.34, strength)),
+                            Color.white.opacity(liquidGlassOpacity(0.12, strength)),
+                            Color.black.opacity(liquidGlassOpacity(0.20, strength))
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                        .allowsHitTesting(false)
+                }
+                .overlay {
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(liquidGlassOpacity(0.20, strength)),
+                            Color.clear,
+                            Color.clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
+                    .allowsHitTesting(false)
+                }
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.white.opacity(liquidGlassOpacity(0.62, strength)))
+                        .frame(height: max(0.5, 1.5 * strength))
+                        .allowsHitTesting(false)
+                }
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(Color.black.opacity(liquidGlassOpacity(0.28, strength)))
+                        .frame(height: 1)
+                        .allowsHitTesting(false)
+                }
+                .shadow(
+                    color: Color.black.opacity(liquidGlassOpacity(0.34, strength)),
+                    radius: 6 + (12 * strength),
+                    x: 0,
+                    y: 2 + (6 * strength)
+                )
+        } else {
+            self.background(.regularMaterial)
+        }
+    }
+
+    @ViewBuilder
+    func graveGlassButton(scale: Double = AppDefaults.liquidGlassScale) -> some View {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            let strength = liquidGlassStrength(scale)
+
+            self
+                .background(.regularMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(liquidGlassOpacity(0.42, strength)),
+                                    Color.white.opacity(liquidGlassOpacity(0.14, strength)),
+                                    Color.black.opacity(liquidGlassOpacity(0.20, strength))
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .allowsHitTesting(false)
+                }
+                .overlay(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(liquidGlassOpacity(0.78, strength)),
+                                    Color.white.opacity(liquidGlassOpacity(0.18, strength)),
+                                    Color.clear
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: max(0.6, 1.4 * strength)
+                        )
+                        .allowsHitTesting(false)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(Color.white.opacity(liquidGlassOpacity(0.52, strength)), lineWidth: max(0.5, strength))
+                        .allowsHitTesting(false)
+                }
+                .overlay(alignment: .topLeading) {
+                    Capsule()
+                        .fill(Color.white.opacity(liquidGlassOpacity(0.38, strength)))
+                        .frame(width: 18 + (12 * strength), height: max(2, 4 * strength))
+                        .padding(.top, 6)
+                        .padding(.leading, 9)
+                        .allowsHitTesting(false)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .shadow(color: Color.white.opacity(liquidGlassOpacity(0.10, strength)), radius: 1 + strength, x: -1, y: -1)
+                .shadow(
+                    color: Color.black.opacity(liquidGlassOpacity(0.36, strength)),
+                    radius: 3 + (6 * strength),
+                    x: 0,
+                    y: 1 + (3 * strength)
+                )
+        } else {
+            self
+        }
+    }
+}
+
+private func liquidGlassStrength(_ scale: Double) -> Double {
+    min(max(scale, 0), 2)
+}
+
+private func liquidGlassOpacity(_ base: Double, _ strength: Double) -> Double {
+    min(max(base * strength, 0), 0.95)
+}
+
 extension Notification.Name {
     static let clearGraveOrphansCache = Notification.Name("ClearGraveOrphansCache")
+    static let syncGraveOrphansFavorites = Notification.Name("SyncGraveOrphansFavorites")
 }
 
 struct SavedLink: Identifiable, Codable {
@@ -158,9 +290,15 @@ struct ContentView: View {
     @State private var showSplash = true
     @State private var splashIconVisible = false
     @State private var showHelp = false
+    @State private var showSettings = false
+    @State private var showMobileFavorites = false
     @State private var showTips = false
     @State private var activeTipIndex = 0
     @State private var cacheClearObserver: NSObjectProtocol?
+    @State private var favoritesSyncRequestObserver: NSObjectProtocol?
+    @State private var lastFavoritesSync = Date.distantPast
+    @State private var protectLocalFavoritesUntil = Date.distantPast
+    @State private var favoritesSyncMessage = "iCloud sync ready"
 
     @AppStorage(AppSettingsKeys.tipsEnabled) private var tipsEnabled = true
     @AppStorage(AppSettingsKeys.appearanceMode) private var appearanceMode = AppearanceMode.dark.rawValue
@@ -168,12 +306,14 @@ struct ContentView: View {
     @AppStorage(AppSettingsKeys.suggestBatchSize) private var suggestBatchSize = AppDefaults.suggestBatchSize
     @AppStorage(AppSettingsKeys.suggestParallelPages) private var suggestParallelPages = AppDefaults.suggestParallelPages
     @AppStorage(AppSettingsKeys.feedbackEmail) private var feedbackEmail = AppDefaults.feedbackEmail
+    @AppStorage(AppSettingsKeys.liquidGlassScale) private var liquidGlassScale = AppDefaults.liquidGlassScale
     @FocusState private var focusedFavoriteID: UUID?
     @FocusState private var urlFieldFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
     private let saveKey = "SavedLinksKey"
     private let backupSaveKey = "SavedLinksBackupKey"
+    private let saveTimestampKey = "SavedLinksUpdatedAt"
     private let helpTips = [
         AppTip(
             title: "Favorites keep your work handy",
@@ -231,7 +371,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active, didInitialSetup {
-                syncFavoritesFromCloud()
+                syncFavoritesNow()
             }
         }
         .alert("Delete this favorite?", isPresented: $showDeleteConfirm) {
@@ -251,6 +391,14 @@ struct ContentView: View {
                 onTipsEnabledChanged: setTipsEnabled
             )
         }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+        }
+        #if os(iOS)
+        .sheet(isPresented: $showMobileFavorites) {
+            mobileFavoritesSheet
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -318,10 +466,17 @@ struct ContentView: View {
             Text("Favorites auto-sort numerically")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Button {
+                syncFavoritesNow()
+            } label: {
+                Label("Sync iCloud", systemImage: "icloud.and.arrow.down")
+            }
+            .help("Sync favorites with iCloud")
         }
         .frame(width: 240)
         .padding()
-        .background(.ultraThinMaterial)
+        .graveGlassPanel(scale: liquidGlassScale)
     }
 
     private var sortedSavedLinks: [SavedLink] {
@@ -361,13 +516,7 @@ struct ContentView: View {
         .contentShape(Rectangle())
         .contextMenu {
             Button("Rename") {
-                editingID = link.id
-                editingText = link.name
-                urlFieldFocused = false
-
-                DispatchQueue.main.async {
-                    focusedFavoriteID = link.id
-                }
+                beginRenaming(link)
             }
 
             Button("Delete", role: .destructive) {
@@ -393,6 +542,11 @@ struct ContentView: View {
                     }
                     .help("Add current URL to favorites")
 
+                    toolbarButton(title: "Sync", systemImage: "icloud.and.arrow.down") {
+                        syncFavoritesNow()
+                    }
+                    .help("Sync favorites with iCloud")
+
                     toolbarButton(title: "Memorials", systemImage: "square.stack") {
                         loadAllMemorials()
                     }
@@ -409,7 +563,7 @@ struct ContentView: View {
                     .help("Back")
 
                     toolbarButton(title: "Forward", systemImage: "chevron.right") {
-                        activeTab?.webView.goForward()
+                        activeTab?.webView?.goForward()
                     }
                     .help("Forward")
 
@@ -444,6 +598,13 @@ struct ContentView: View {
                     }
                     .help("Help and tips")
 
+                    #if os(iOS)
+                    toolbarButton(title: "Settings", systemImage: "gearshape") {
+                        showSettings = true
+                    }
+                    .help("Settings")
+                    #endif
+
                     Button {
                         if let activeTab {
                             closeTab(activeTab)
@@ -460,25 +621,18 @@ struct ContentView: View {
             }
         }
         .padding(10)
-        .background(.regularMaterial)
+        .graveGlassPanel(scale: liquidGlassScale)
     }
 
     private var mobileFavoritesBar: some View {
         HStack(spacing: 10) {
-            Menu {
-                Button("Website Home") {
-                    openWebsiteHome()
-                }
-
-                ForEach(sortedSavedLinks) { link in
-                    Button(link.name) {
-                        openTab(url: link.url)
-                    }
-                }
+            Button {
+                showMobileFavorites = true
             } label: {
                 Label("Favorites", systemImage: "star")
                     .font(.subheadline)
             }
+            .buttonStyle(.bordered)
 
             Spacer()
 
@@ -488,8 +642,123 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
+        .graveGlassPanel(scale: liquidGlassScale)
     }
+
+    #if os(iOS)
+    private var mobileFavoritesSheet: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        syncFavoritesNow()
+                    } label: {
+                        Label("Sync iCloud Favorites", systemImage: "icloud.and.arrow.down")
+                    }
+
+                    Button {
+                        showMobileFavorites = false
+                        openWebsiteHome()
+                    } label: {
+                        Label("Website Home", systemImage: "safari")
+                    }
+                }
+
+                Section("Favorites") {
+                    if sortedSavedLinks.isEmpty {
+                        ContentUnavailableView(
+                            "No Favorites",
+                            systemImage: "star",
+                            description: Text("Open a page and tap Favorite to save it here.")
+                        )
+                    } else {
+                        ForEach(sortedSavedLinks) { link in
+                            mobileFavoriteRow(link)
+                        }
+                    }
+                }
+
+                Section {
+                    Text("\(favoritesSyncMessage). Favorites auto-sort numerically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Favorites")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        finishFavoriteEditing()
+                        showMobileFavorites = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func mobileFavoriteRow(_ link: SavedLink) -> some View {
+        HStack(spacing: 10) {
+            if editingID == link.id {
+                TextField("Name", text: $editingText)
+                    .focused($focusedFavoriteID, equals: link.id)
+                    .textInputAutocapitalization(.words)
+                    .onSubmit {
+                        renameLink(link)
+                    }
+
+                Button("Save") {
+                    renameLink(link)
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                Button {
+                    showMobileFavorites = false
+                    openTab(url: link.url)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(link.name)
+                            .font(.body)
+                            .lineLimit(1)
+
+                        Text(link.url)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                linkToDelete = link
+                showDeleteConfirm = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+
+            Button {
+                beginRenaming(link)
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            .tint(.blue)
+        }
+        .contextMenu {
+            Button("Rename") {
+                beginRenaming(link)
+            }
+
+            Button("Delete", role: .destructive) {
+                linkToDelete = link
+                showDeleteConfirm = true
+            }
+        }
+    }
+    #endif
 
     private func toolbarButton(
         title: String,
@@ -508,29 +777,15 @@ struct ContentView: View {
             }
             .frame(width: 72, height: 52)
             .contentShape(RoundedRectangle(cornerRadius: 7))
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(Color.primary.opacity(0.04))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(Color.primary.opacity(0.18), lineWidth: 1)
-            )
         }
         .buttonStyle(.plain)
+        .graveGlassButton(scale: liquidGlassScale)
     }
 
     private var tabBar: some View {
-        GeometryReader { geometry in
-            let spacing: CGFloat = 4
-            let horizontalPadding: CGFloat = 24
-            let availableWidth = max(1, geometry.size.width - horizontalPadding)
-            let totalSpacing = spacing * CGFloat(max(tabs.count - 1, 0))
-            let tabWidth = max(
-                54,
-                min(220, (availableWidth - totalSpacing) / CGFloat(max(tabs.count, 1)))
-            )
+        let glass = liquidGlassStrength(liquidGlassScale)
 
+        return ScrollView(.horizontal, showsIndicators: true) {
             HStack(spacing: spacing) {
                 ForEach(tabs) { tab in
                     HStack(spacing: 5) {
@@ -559,11 +814,49 @@ struct ContentView: View {
                     .padding(.vertical, 6)
                     .frame(width: tabWidth)
                     .background(
-                        selectedTabID == tab.id
-                        ? Color.accentColor.opacity(0.25)
-                        : Color.gray.opacity(0.15)
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.regularMaterial)
                     )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        selectedTabID == tab.id
+                                        ? Color.accentColor.opacity(liquidGlassOpacity(0.42, glass))
+                                        : Color.white.opacity(liquidGlassOpacity(0.30, glass)),
+                                        Color.white.opacity(liquidGlassOpacity(0.08, glass)),
+                                        Color.black.opacity(liquidGlassOpacity(0.20, glass))
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .allowsHitTesting(false)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                Color.white.opacity(liquidGlassOpacity(selectedTabID == tab.id ? 0.68 : 0.46, glass)),
+                                lineWidth: max(0.5, 1.2 * glass)
+                            )
+                            .allowsHitTesting(false)
+                    )
+                    .overlay(alignment: .topLeading) {
+                        Capsule()
+                            .fill(Color.white.opacity(liquidGlassOpacity(0.38, glass)))
+                            .frame(width: 20 + (14 * glass), height: max(2, 4 * glass))
+                            .padding(.top, 5)
+                            .padding(.leading, 8)
+                            .allowsHitTesting(false)
+                    }
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .shadow(
+                        color: Color.black.opacity(liquidGlassOpacity(0.34, glass)),
+                        radius: 3 + (6 * glass),
+                        x: 0,
+                        y: 1 + (3 * glass)
+                    )
                     .help(tab.title)
                 }
 
@@ -573,7 +866,19 @@ struct ContentView: View {
             .padding(.vertical, 6)
         }
         .frame(height: 46)
-        .background(Color.black.opacity(0.15))
+        .graveGlassPanel(scale: liquidGlassScale)
+    }
+
+    private var tabWidth: CGFloat {
+        #if os(iOS)
+        170
+        #else
+        190
+        #endif
+    }
+
+    private var spacing: CGFloat {
+        4
     }
 
     private var statusBar: some View {
@@ -584,14 +889,26 @@ struct ContentView: View {
         }
         .font(.caption2)
         .padding(.vertical, 3)
+        .frame(maxWidth: .infinity)
+        .graveGlassPanel(scale: liquidGlassScale)
     }
 
     private var browserArea: some View {
         Group {
-            if let activeTab {
-                WebViewDisplay(webView: activeTab.webView)
+            if let activeTab, let webView = activeTab.webView {
+                WebViewDisplay(webView: webView)
                     .id(activeTab.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if activeTab != nil {
+                ContentUnavailableView(
+                    "Loading tab",
+                    systemImage: "globe",
+                    description: Text("Preparing this page.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    ensureSelectedTabWebView()
+                }
             } else {
                 ContentUnavailableView(
                     "No tab open",
@@ -612,20 +929,13 @@ struct ContentView: View {
 
         if let existing = tabs.first(where: { $0.id == finalURL.absoluteString }) {
             selectTab(existing)
-            existing.webView.load(noCacheRequest(for: finalURL))
+            activeTab?.webView?.load(noCacheRequest(for: finalURL))
             urlString = formatted
             return
         }
 
-        let webView = WebViewFactory.makeWebView()
         let tabID = finalURL.absoluteString
-        let navigationDelegate = TabNavigationDelegate()
-        navigationDelegate.onTitleChanged = { title in
-            updateTabTitle(tabID: tabID, title: title)
-        }
-        webView.navigationDelegate = navigationDelegate
-        webView.allowsBackForwardNavigationGestures = true
-        webView.load(noCacheRequest(for: finalURL))
+        let (webView, navigationDelegate) = loadedWebView(for: finalURL, tabID: tabID)
 
         let tab = BrowserTab(
             id: tabID,
@@ -649,16 +959,51 @@ struct ContentView: View {
 
     private func selectTab(_ tab: BrowserTab) {
         selectedTabID = tab.id
-        urlString = tab.webView.url?.absoluteString ?? tab.id
+        ensureWebView(for: tab.id)
+        urlString = activeTab?.webView?.url?.absoluteString ?? tab.id
+    }
+
+    private func ensureSelectedTabWebView() {
+        guard let selectedTabID else {
+            return
+        }
+
+        ensureWebView(for: selectedTabID)
+    }
+
+    private func ensureWebView(for tabID: String) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }),
+              tabs[index].webView == nil,
+              let url = URL(string: tabs[index].id) else {
+            return
+        }
+
+        let (webView, navigationDelegate) = loadedWebView(for: url, tabID: tabID)
+        tabs[index].webView = webView
+        tabs[index].navigationDelegate = navigationDelegate
+    }
+
+    private func loadedWebView(for url: URL, tabID: String) -> (WKWebView, TabNavigationDelegate) {
+        let webView = WebViewFactory.makeWebView()
+        let navigationDelegate = TabNavigationDelegate()
+        navigationDelegate.onTitleChanged = { title in
+            updateTabTitle(tabID: tabID, title: title)
+        }
+        webView.navigationDelegate = navigationDelegate
+        webView.allowsBackForwardNavigationGestures = true
+        webView.load(noCacheRequest(for: url))
+
+        return (webView, navigationDelegate)
     }
 
     private func closeTab(_ tab: BrowserTab) {
-        tab.webView.stopLoading()
+        tab.webView?.stopLoading()
         tabs.removeAll { $0.id == tab.id }
 
         if selectedTabID == tab.id {
             selectedTabID = tabs.last?.id
-            urlString = activeTab?.webView.url?.absoluteString ?? ""
+            ensureSelectedTabWebView()
+            urlString = activeTab?.webView?.url?.absoluteString ?? ""
         }
     }
 
@@ -702,7 +1047,7 @@ struct ContentView: View {
     }
 
     private func openInBrowser() {
-        guard let currentURL = activeTab?.webView.url else {
+        guard let currentURL = activeTab?.webView?.url else {
             return
         }
 
@@ -719,7 +1064,7 @@ struct ContentView: View {
 
     private func closeAllTabs() {
         tabs.forEach { tab in
-            tab.webView.stopLoading()
+            tab.webView?.stopLoading()
         }
 
         tabs.removeAll()
@@ -851,10 +1196,11 @@ struct ContentView: View {
         loadFaves()
         startFavoritesSync()
         startCacheClearObserver()
+        startFavoritesSyncRequestObserver()
         openStartPage()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
-            syncFavoritesFromCloud()
+            syncFavoritesNow()
         }
     }
 
@@ -877,19 +1223,22 @@ struct ContentView: View {
         splashIconVisible = false
         showSplash = true
 
-        DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 2.4)) {
+        if configureAfter {
+            configureAppOnce()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            withAnimation(.easeInOut(duration: 4.2)) {
                 splashIconVisible = true
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) {
-            withAnimation(.easeOut(duration: 0.25)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.1) {
+            withAnimation(.easeOut(duration: 0.35)) {
                 showSplash = false
             }
 
             if configureAfter {
-                configureAppOnce()
                 showFirstRunTipsSoon()
             }
         }
@@ -944,7 +1293,7 @@ struct ContentView: View {
     }
 
     private func addCurrentToFaves() {
-        let candidate = activeTab?.webView.url?.absoluteString ?? urlString
+        let candidate = activeTab?.webView?.url?.absoluteString ?? urlString
         let formatted = formatURL(candidate)
 
         guard let url = URL(string: formatted),
@@ -966,24 +1315,46 @@ struct ContentView: View {
 
     private func deleteLink(_ link: SavedLink) {
         savedLinks.removeAll { $0.id == link.id }
+        if editingID == link.id {
+            finishFavoriteEditing()
+        }
         saveFaves()
+    }
+
+    private func beginRenaming(_ link: SavedLink) {
+        editingID = link.id
+        editingText = link.name
+        urlFieldFocused = false
+
+        DispatchQueue.main.async {
+            focusedFavoriteID = link.id
+        }
+    }
+
+    private func finishFavoriteEditing() {
+        editingID = nil
+        editingText = ""
+        focusedFavoriteID = nil
     }
 
     private func renameLink(_ link: SavedLink) {
         if let index = savedLinks.firstIndex(where: { $0.id == link.id }) {
-            savedLinks[index].name = editingText
+            let trimmedName = editingText.trimmingCharacters(in: .whitespacesAndNewlines)
+            savedLinks[index].name = trimmedName.isEmpty ? link.name : trimmedName
             saveFaves()
         }
 
-        editingID = nil
-        focusedFavoriteID = nil
+        finishFavoriteEditing()
     }
 
     private func saveFaves() {
+        saveFaves(markUpdated: true)
+    }
+
+    private func saveFaves(markUpdated: Bool) {
         let linksToSave = cleanedLinks(savedLinks)
 
-        guard !linksToSave.isEmpty,
-              let data = try? JSONEncoder().encode(linksToSave) else {
+        guard let data = try? JSONEncoder().encode(linksToSave) else {
             return
         }
 
@@ -991,9 +1362,21 @@ struct ContentView: View {
         UserDefaults.standard.set(data, forKey: saveKey)
         UserDefaults.standard.set(data, forKey: backupSaveKey)
 
+        let updatedAt: TimeInterval
+        if markUpdated {
+            protectLocalFavoritesUntil = Date().addingTimeInterval(30)
+            updatedAt = Date().timeIntervalSince1970
+            UserDefaults.standard.set(updatedAt, forKey: saveTimestampKey)
+        } else {
+            updatedAt = UserDefaults.standard.double(forKey: saveTimestampKey)
+        }
+
         let store = NSUbiquitousKeyValueStore.default
         store.set(data, forKey: saveKey)
+        store.set(updatedAt, forKey: saveTimestampKey)
         store.synchronize()
+        markFavoritesSynced()
+        favoritesSyncMessage = "Pushed to iCloud"
     }
 
     private func loadFaves() {
@@ -1025,6 +1408,20 @@ struct ContentView: View {
         store.synchronize()
     }
 
+    private func startFavoritesSyncRequestObserver() {
+        guard favoritesSyncRequestObserver == nil else {
+            return
+        }
+
+        favoritesSyncRequestObserver = NotificationCenter.default.addObserver(
+            forName: .syncGraveOrphansFavorites,
+            object: nil,
+            queue: .main
+        ) { _ in
+            syncFavoritesNow()
+        }
+    }
+
     private func startCacheClearObserver() {
         guard cacheClearObserver == nil else {
             return
@@ -1041,7 +1438,7 @@ struct ContentView: View {
 
     private func clearBrowserCache() {
         tabs.forEach { tab in
-            tab.webView.stopLoading()
+            tab.webView?.stopLoading()
         }
 
         WKWebsiteDataStore.default().removeData(
@@ -1050,47 +1447,87 @@ struct ContentView: View {
         ) {
             DispatchQueue.main.async {
                 self.tabs.forEach { tab in
-                    if let url = tab.webView.url {
-                        tab.webView.load(self.noCacheRequest(for: url))
+                    if let webView = tab.webView,
+                       let url = webView.url {
+                        webView.load(self.noCacheRequest(for: url))
                     }
                 }
             }
         }
     }
 
-    private func syncFavoritesFromCloud() {
+    private func syncFavoritesNow() {
+        syncFavoritesFromCloud(throttled: false)
+    }
+
+    private func syncFavoritesFromCloud(throttled: Bool = false) {
+        if throttled, Date().timeIntervalSince(lastFavoritesSync) < 15 {
+            return
+        }
+
+        lastFavoritesSync = Date()
         let store = NSUbiquitousKeyValueStore.default
         store.synchronize()
+        let localUpdatedAt = UserDefaults.standard.double(forKey: saveTimestampKey)
+        let cloudUpdatedAt = store.double(forKey: saveTimestampKey)
 
         if let data = store.data(forKey: saveKey),
            let cloudLinks = try? JSONDecoder().decode([SavedLink].self, from: data) {
             let cleanedCloudLinks = cleanedLinks(cloudLinks)
             let cleanedLocalLinks = cleanedLinks(savedLinks)
 
-            if cleanedCloudLinks.isEmpty, !cleanedLocalLinks.isEmpty {
-                saveFaves()
+            if Date() < protectLocalFavoritesUntil {
+                favoritesSyncMessage = "Keeping recent local edit"
+                return
+            }
+
+            if cloudUpdatedAt > localUpdatedAt {
+                savedLinks = cleanedCloudLinks
+                UserDefaults.standard.set(data, forKey: saveKey)
+                UserDefaults.standard.set(data, forKey: backupSaveKey)
+                UserDefaults.standard.set(cloudUpdatedAt, forKey: saveTimestampKey)
+                markFavoritesSynced()
+                favoritesSyncMessage = "Updated from iCloud"
+                return
+            }
+
+            if localUpdatedAt > cloudUpdatedAt {
+                saveFaves(markUpdated: false)
+                markFavoritesSynced()
+                favoritesSyncMessage = "Pushed latest favorites to iCloud"
                 return
             }
 
             let mergedLinks = mergedFavorites(local: cleanedLocalLinks, cloud: cleanedCloudLinks)
 
-            if !mergedLinks.isEmpty,
-               mergedLinks.map(\.url) != cleanedLocalLinks.map(\.url) ||
+            if mergedLinks.map(\.url) != cleanedLocalLinks.map(\.url) ||
                 mergedLinks.map(\.name) != cleanedLocalLinks.map(\.name) {
                 savedLinks = mergedLinks
-                saveFaves()
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: saveTimestampKey)
+                saveFaves(markUpdated: false)
+                markFavoritesSynced()
+                favoritesSyncMessage = "Merged iCloud favorites"
+            } else {
+                markFavoritesSynced()
+                favoritesSyncMessage = "iCloud favorites current"
             }
 
             return
         }
 
-        guard !savedLinks.isEmpty,
-              let data = try? JSONEncoder().encode(savedLinks) else {
+        guard let data = try? JSONEncoder().encode(cleanedLinks(savedLinks)) else {
             return
         }
 
         store.set(data, forKey: saveKey)
+        store.set(localUpdatedAt, forKey: saveTimestampKey)
         store.synchronize()
+        markFavoritesSynced()
+        favoritesSyncMessage = "Pushed to iCloud"
+    }
+
+    private func markFavoritesSynced() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: AppSettingsKeys.lastFavoritesSyncAt)
     }
 
     private func linksFromLocalStore(forKey key: String) -> [SavedLink] {
@@ -1121,15 +1558,13 @@ struct ContentView: View {
     }
 
     private func mergedFavorites(local: [SavedLink], cloud: [SavedLink]) -> [SavedLink] {
-        var merged = local
-        var knownURLs = Set(local.map(\.url))
+        var mergedByURL = Dictionary(uniqueKeysWithValues: local.map { ($0.url, $0) })
 
-        for link in cloud where !knownURLs.contains(link.url) {
-            merged.append(link)
-            knownURLs.insert(link.url)
+        for link in cloud {
+            mergedByURL[link.url] = link
         }
 
-        return cleanedLinks(merged)
+        return cleanedLinks(Array(mergedByURL.values))
     }
 
     private func openExternalURL(_ url: URL) {
@@ -1144,8 +1579,32 @@ struct ContentView: View {
         #if os(macOS)
         urls.forEach(openExternalURL)
         #elseif os(iOS)
-        urls.forEach { openTab(url: $0.absoluteString) }
+        let firstTabID = urls.first?.absoluteString
+
+        for url in urls {
+            addDeferredTab(url)
+        }
+
+        if let firstTabID,
+           let firstTab = tabs.first(where: { $0.id == firstTabID }) {
+            selectTab(firstTab)
+        }
         #endif
+    }
+
+    private func addDeferredTab(_ url: URL) {
+        if tabs.contains(where: { $0.id == url.absoluteString }) {
+            return
+        }
+
+        tabs.append(
+            BrowserTab(
+                id: url.absoluteString,
+                title: TabNavigationDelegate.titleFallback(for: url),
+                webView: nil,
+                navigationDelegate: nil
+            )
+        )
     }
 }
 

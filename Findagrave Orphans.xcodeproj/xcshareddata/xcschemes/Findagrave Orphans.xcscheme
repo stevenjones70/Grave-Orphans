@@ -6,6 +6,24 @@
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
       buildArchitectures = "Automatic">
+      <PostActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Stamp Build Number"
+               scriptText = "BUILD_NUMBER=$(date +%Y%m%d%H%M)&#10;INFO_PLIST=&quot;$TARGET_BUILD_DIR/$INFOPLIST_PATH&quot;&#10;if [ -f &quot;$INFO_PLIST&quot; ]; then&#10;    /usr/libexec/PlistBuddy -c &quot;Set :CFBundleVersion $BUILD_NUMBER&quot; &quot;$INFO_PLIST&quot;&#10;fi&#10;">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "479710A22F9D27B200C111A8"
+                     BuildableName = "Grave Orphans.app"
+                     BlueprintName = "Grave Orphans"
+                     ReferencedContainer = "container:Findagrave Orphans.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PostActions>
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"

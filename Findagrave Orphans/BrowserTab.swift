@@ -4,6 +4,6 @@ import WebKit
 struct BrowserTab: Identifiable {
     let id: String
     var title: String
-    var webView: WKWebView
-    var navigationDelegate: TabNavigationDelegate
+    var webView: WKWebView?
+    var navigationDelegate: TabNavigationDelegate?
 }
